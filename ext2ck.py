@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/python3
 # ext2ck.py
 # analyze a file system summary and report on all discovered inconsistencies
 # Ian Brault <ianbrault@ucla.edu>
@@ -8,7 +8,7 @@ import sys
 
 
 # usage message
-usage = "usage: lab3b filename"
+usage = "usage: ext2ck.py filename"
 
 # filesystem metadata, read in from CSV
 n_blocks    = 0
