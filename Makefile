@@ -14,7 +14,7 @@ INC = ext2.h
 PY  = ext2ck.py
 PYC = ext2ck.pyc
 PYCACHE = __pycache__
-PYC_GEN = $(PYCACHE)/lab3b.cpython-35.pyc
+PYC_GEN = $(PYCACHE)/ext2ck.cpython-35.pyc
 
 
 .PHONY: all clean
