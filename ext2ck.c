@@ -28,6 +28,8 @@ const __u16 EXT2_S_IFLNK = 0xA000;
 #define BITMAP_COUNT(bmp) __builtin_popcount(bmp)
 
 void *Malloc(size_t size);
+ssize_t Pread(int fd, void *buf, size_t count, off_t offset);
+
 void parse_args(int argc, char *argv[]);
 
 /* stat EXT2 info, store in structs */
@@ -63,8 +65,18 @@ void *
 Malloc(size_t size)
 {
 	void *b = malloc(size);
-	if (!b) { perror("malloc failed"); _exit(1); }
+	if (!b) { perror("malloc"); _exit(1); }
 	return b;
+}
+
+
+/* pread wrapper */
+ssize_t
+Pread(int fd, void *buf, size_t count, off_t offset)
+{
+	ssize_t r = pread(fd, buf, count, offset);
+	if (r < 0) { perror("pread"); _exit(1); }
+	return r;
 }
 
 
@@ -100,18 +112,11 @@ parse_args(int argc, char *argv[])
 int
 ext2_read_super(struct ext2_super_block *esb, off_t offset)
 {
-	ssize_t r;
-	char *buf;
-  
+	char *buf;  
 	// allocate buffer to block size
 	buf = Malloc(EXT2_MIN_BLOCK_SIZE * sizeof(char));
 	// read superblock into buffer
-	r = pread(imgfd, buf, EXT2_MIN_BLOCK_SIZE, offset);
-	if (r < 0)
-    {
-		perror("pread failed");
-		_exit(1);
-    }
+	Pread(imgfd, buf, EXT2_MIN_BLOCK_SIZE, offset);
 	
 	// reference for superblock structure & offsets:
 	// www.nongnu.org/ext2-doc/ext2.html#SUPERBLOCK
@@ -147,18 +152,11 @@ ext2_read_super(struct ext2_super_block *esb, off_t offset)
 int
 ext2_read_group_desc(struct ext2_group_desc *egd, off_t offset)
 {
-	ssize_t r;
 	char *buf;
-  
 	// allocate buffer to block size
 	buf = Malloc(BLOCK_SIZE * sizeof(char));
 	// read group table into buffer
-	r = pread(imgfd, buf, BLOCK_SIZE, offset);
-	if (r < 0)
-    {
-		perror("pread failed");
-		_exit(1);
-    }
+	Pread(imgfd, buf, BLOCK_SIZE, offset);
 	
 	// reference for superblock structure & offsets:
 	// www.nongnu.org/ext2-doc/ext2.html#BLOCK-GROUP-DESCRIPTOR-TABLE
@@ -186,18 +184,12 @@ int
 ext2_read_inode(struct ext2_inode *ei, off_t offset)
 {
 	int i;
-	ssize_t r;
 	char *buf;
   
 	// allocate buffer to block size
 	buf = Malloc(BLOCK_SIZE * sizeof(char));
 	// read inode block into buffer
-	r = pread(imgfd, buf, BLOCK_SIZE, offset);
-	if (r < 0)
-    {
-		perror("pread failed");
-		_exit(1);
-    }
+	Pread(imgfd, buf, BLOCK_SIZE, offset);
   
 	// reference for superblock structure & offsets:
 	// www.nongnu.org/ext2-doc/ext2.html#INODE-TABLE
@@ -237,7 +229,6 @@ ext2_read_dirent(struct ext2_dir_entry *ede, char *dir_blocks,
 		 off_t offset, int size)
 {
 	char *buf;
-  
 	// allocate buffer to size of dirent
 	buf = Malloc(size * sizeof(char));
 	// read dirent into buffer
@@ -297,7 +288,6 @@ ext2_group_scan_bitmaps(struct ext2_group_desc egd)
 	int i, j, n_blocks, in;
 	int block_bmp, inode_bmp, inode_table;
 	char *buf, *chunk;
-	ssize_t r;
 
 	// keep track of which inodes are allocated
 	int *used_inodes;
@@ -315,12 +305,7 @@ ext2_group_scan_bitmaps(struct ext2_group_desc egd)
 	used_inodes = Malloc((INODES_PER_GROUP+1) * sizeof(int));
 
 	// read block bitmap into buffer
-	r = pread(imgfd, buf, BLOCK_SIZE, block_bmp * BLOCK_SIZE);
-	if (r < 0)
-    {
-		perror("pread failed");
-		_exit(1);
-    }
+	Pread(imgfd, buf, BLOCK_SIZE, block_bmp * BLOCK_SIZE);
 
 	// scan byte-at-a-time
 	for (i = 0; i < n_blocks; i++)
@@ -334,13 +319,7 @@ ext2_group_scan_bitmaps(struct ext2_group_desc egd)
     }
 
 	// read inode bitmap into buffer
-	r = pread(imgfd, buf, BLOCK_SIZE, inode_bmp * BLOCK_SIZE);
-	if (r < 0)
-    {
-		perror("pread failed");
-		_exit(1);
-    }
-
+	Pread(imgfd, buf, BLOCK_SIZE, inode_bmp * BLOCK_SIZE);
 	// scan byte-at-a-time
 	for (i = 0; i < INODES_PER_GROUP/8; i++)
     {
@@ -464,7 +443,6 @@ ext2_dir_csv(struct ext2_inode dir_inode, int in)
 	struct ext2_dir_entry dirent;
 	int dir_size, dirent_offset;
 	__u16 dirent_size;
-	ssize_t r;
 	
 	int *indir_block;
 
@@ -478,9 +456,7 @@ ext2_dir_csv(struct ext2_inode dir_inode, int in)
 	i = 0;
 	while (dir_inode.i_block[i] != 0 && i < 12)
     {
-		r = pread(imgfd, &buf[i*BLOCK_SIZE], BLOCK_SIZE,
-				  dir_inode.i_block[i]*BLOCK_SIZE);
-		if (r < 0) { perror("pread failed"); _exit(1); }
+		Pread(imgfd, &buf[i*BLOCK_SIZE], BLOCK_SIZE, dir_inode.i_block[i]*BLOCK_SIZE);
 		i++;
     }
 
@@ -489,17 +465,14 @@ ext2_dir_csv(struct ext2_inode dir_inode, int in)
     {
 		// allocate and read in indirect block
 		indir_block = Malloc(BLOCK_SIZE);
-		r = pread(imgfd, indir_block, BLOCK_SIZE,
-				  dir_inode.i_block[12] * BLOCK_SIZE);
-		if (r < 0) { perror("pread failed"); _exit(1); }
+		Pread(imgfd, indir_block, BLOCK_SIZE, dir_inode.i_block[12] * BLOCK_SIZE);
 		
 		// read in indirect blocks
 		i = 0;
 		while (indir_block[i] != 0)
 		{
-			r = pread(imgfd, &buf[(i+12)*BLOCK_SIZE], BLOCK_SIZE,
-					  indir_block[i] * BLOCK_SIZE);
-			if (r < 0) { perror("pread failed"); _exit(1); }
+			Pread(imgfd, &buf[(i+12)*BLOCK_SIZE], BLOCK_SIZE,
+				  indir_block[i] * BLOCK_SIZE);
 			i++;
 		}
 		
@@ -574,18 +547,12 @@ ext2_indir_block_csv_helper(int inode, int indir, int offset, int block)
 {
 	int i = 0;
 	int refblock = 0;
-	ssize_t r;
 	int *buf;
 
 	// allocate buffer to block size
 	buf = Malloc(BLOCK_SIZE * sizeof(int));
 	// read into buffer
-	r = pread(imgfd, buf, BLOCK_SIZE, block*BLOCK_SIZE);
-	if (r < 0)
-    {
-		perror("pread failed");
-		_exit(1);
-    }
+	Pread(imgfd, buf, BLOCK_SIZE, block*BLOCK_SIZE);
 	
 	refblock = buf[0];
 	while (refblock != 0 && i != 256)
