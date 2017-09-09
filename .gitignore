@@ -1,5 +1,5 @@
 __pycache__
 ext2ck
 *.o
-*.pyc
+*.csv
 *.img
