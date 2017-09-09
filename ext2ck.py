@@ -1,13 +1,7 @@
-#!/usr/local/cs/bin/python3
-
-# lab3b.py
-# analyze a file system summary (.csv) and report on all
-# discovered inconsistencies
-
-# NAME: Ian Brault and Jason Levine
-# EMAIL: ianbrault@ucla.edu jasonlevine@ucla.edu
-# ID: 604601170 404561820
-
+#!/usr/local/bin/python3
+# ext2ck.py
+# analyze a file system summary and report on all discovered inconsistencies
+# Ian Brault <ianbrault@ucla.edu>
 
 import math
 import sys
