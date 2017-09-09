@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -50,6 +52,9 @@ void ext2_indir_block_csv_helper(int inode, int indir, int offset, int block);
 
 /* filesystem image file descriptor */
 static int imgfd = -1;
+/* CSV summary file descriptor */
+static int csvfd = -1;
+static const char *csv_file = "summary.csv";
 
 /* disk structure variables, set after reading superblock */
 static int BLOCK_SIZE = 0;
@@ -93,12 +98,21 @@ parse_args(int argc, char *argv[])
 		_exit(1);
     }
 
+	// open filesystem image
 	imgfd = open(argv[1], O_RDONLY);
 	if (imgfd < 0)
     {
-		perror("open failed");
+		perror("open");
 		_exit(2);
     }
+
+	// open CSV file
+	csvfd = open(csv_file, O_CREAT|O_TRUNC|O_WRONLY, S_IRUSR|S_IWUSR);
+	if (csvfd < 0)
+	{
+		perror("open");
+		_exit(1);
+	}
 }
 
 
@@ -256,7 +270,7 @@ void
 ext2_super_csv(struct ext2_super_block esb)
 {
 	int bsize = EXT2_MIN_BLOCK_SIZE << esb.s_log_block_size;
-	printf("SUPERBLOCK,%d,%d,%d,%d,%d,%d,%d\n",
+	dprintf(csvfd, "SUPERBLOCK,%d,%d,%d,%d,%d,%d,%d\n",
 		   esb.s_blocks_count, esb.s_inodes_count, bsize, esb.s_inode_size,
 		   esb.s_blocks_per_group, esb.s_inodes_per_group, esb.s_first_ino);
 }
@@ -270,7 +284,7 @@ ext2_super_csv(struct ext2_super_block esb)
 void
 ext2_group_csv(struct ext2_group_desc egd, int gn)
 {
-	printf("GROUP,%d,%d,%d,%d,%d,%d,%d,%d\n",
+	dprintf(csvfd, "GROUP,%d,%d,%d,%d,%d,%d,%d,%d\n",
 		   gn, BLOCKS_PER_GROUP, INODES_PER_GROUP, egd.bg_free_blocks_count,
 		   egd.bg_free_inodes_count, egd.bg_block_bitmap, egd.bg_inode_bitmap,
 		   egd.bg_inode_table);
@@ -314,7 +328,7 @@ ext2_group_scan_bitmaps(struct ext2_group_desc egd)
 		// go through chunk
 		for (j = 0; j < 8; j++)
 		{
-			if (!(((*chunk) >> j) & 1)) printf("BFREE,%d\n", 8*i + j + 1);
+			if (!(((*chunk) >> j) & 1)) dprintf(csvfd, "BFREE,%d\n", 8*i + j + 1);
 		}
     }
 
@@ -331,7 +345,7 @@ ext2_group_scan_bitmaps(struct ext2_group_desc egd)
 			// if free, log as free inode
 			if (!(((*chunk) >> j) & 1))
 			{
-				printf("IFREE,%d\n", in);
+				dprintf(csvfd, "IFREE,%d\n", in);
 				used_inodes[in-1] = 0;
 			}
 			// otherwise, keep track that it's allocated
@@ -421,12 +435,12 @@ ext2_inode_csv(struct ext2_inode ei, int in)
 			 tm_a->tm_hour, tm_a->tm_min, tm_a->tm_sec);
 	
 	// print inode attributes
-	printf("INODE,%d,%c,%o,%d,%d,%d,%s,%s,%s,%d,%d",
+	dprintf(csvfd, "INODE,%d,%c,%o,%d,%d,%d,%s,%s,%s,%d,%d",
 		   in, type, ei.i_mode & 0x0FFF, ei.i_uid, ei.i_gid, ei.i_links_count,
 		   ctime, mtime, atime, ei.i_size, ei.i_blocks);
 	// print block addresses
-	for (i = 0; i < 15; i++) printf(",%d", ei.i_block[i]);
-	printf("\n");
+	for (i = 0; i < 15; i++) dprintf(csvfd, ",%d", ei.i_block[i]);
+	dprintf(csvfd, "\n");
 }
 
 
@@ -489,7 +503,7 @@ ext2_dir_csv(struct ext2_inode dir_inode, int in)
     {
 		memcpy(name, &dirent.name, dirent.name_len);
 		name[dirent.name_len] = 0;
-		printf("DIRENT,%d,%d,%d,%d,%d,'%s'\n",
+		dprintf(csvfd, "DIRENT,%d,%d,%d,%d,%d,'%s'\n",
 			   in, dirent_offset, dirent.inode, dirent.rec_len,
 			   dirent.name_len, name);
 		
@@ -557,7 +571,7 @@ ext2_indir_block_csv_helper(int inode, int indir, int offset, int block)
 	refblock = buf[0];
 	while (refblock != 0 && i != 256)
     {
-		printf("INDIRECT,%d,%d,%d,%d,%d\n",
+		dprintf(csvfd, "INDIRECT,%d,%d,%d,%d,%d\n",
 			   inode, indir, offset, block, refblock);
 		if (indir == 1) offset++;
 		else if (indir == 2)
@@ -582,7 +596,8 @@ ext2_indir_block_csv_helper(int inode, int indir, int offset, int block)
 int
 main(int argc, char *argv[])
 {
-	int i;
+	int i, rc, status, pid;
+	char *path;
 	struct ext2_super_block super;
 	struct ext2_group_desc *groups;
   
@@ -609,9 +624,30 @@ main(int argc, char *argv[])
 		ext2_read_group_desc(&groups[i], GROUP_SIZE*i + SUPER_OFFSET+BLOCK_SIZE);
 		ext2_group_csv(groups[i], i);
     }
+	
 	// scan group bitmaps for free blocks/inodes
 	for (i = 0; i < N_GROUPS; i++) ext2_group_scan_bitmaps(groups[i]);
 
 	free(groups);
+	close(imgfd);
+	close(csvfd);
+
+	// get current directory
+	path = Malloc(1024 * sizeof(char));
+	path = getcwd(path, 1024);
+
+	// spawn Python script
+	pid = fork();
+	if (pid == 0)
+	{
+		path = strncat(path, "/ext2ck.py", strlen("/ext2ck.py"));
+		
+		rc = execl(path, path, csv_file, NULL);
+		if (rc < 0) { perror("execl"); _exit(1); }
+	}
+	else if (pid > 0) waitpid(pid, &status, 0);
+	else { perror("fork"); _exit(1); }
+
+	free(path);
 	return 0;
 }
