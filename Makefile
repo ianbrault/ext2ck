@@ -10,29 +10,18 @@ EXE = ext2ck
 OBJ = ext2ck.o
 SRC = ext2ck.c
 INC = ext2.h
-# Python files
 PY  = ext2ck.py
-PYC = ext2ck.pyc
-PYCACHE = __pycache__
-PYC_GEN = $(PYCACHE)/ext2ck.cpython-35.pyc
 
 
 .PHONY: all clean
 
 all: $(EXE)
 
-$(EXE): $(OBJ) $(PYC)
+$(EXE): $(OBJ)
 	$(CC) $(CFLAGS) -o $@ $<
-	@echo -e "#!/bin/sh\npython3 $< \$$*" > $@
-	@chmod 755 $@
 
 $(OBJ): $(SRC) $(INC)
 	$(CC) $(CFLAGS) -c $<
 
-$(PYC): $(PY)
-	python3 -m py_compile $(PY)
-	@mv $(PYC_GEN) $(PYC)
-	@rmdir $(PYCACHE)
-
 clean:
-	rm -rf $(EXE) $(PYCACHE) $(PYC) *.o
+	rm -rf $(EXE) *.o
